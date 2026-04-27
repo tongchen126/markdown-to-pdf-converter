@@ -46,18 +46,26 @@ console.log(`Input:  ${path.basename(inputFile)}`);
 console.log(`Output: ${path.basename(outputFile)}`);
 console.log('================================================\n');
 
-async function unzipFile(zipPath, destDir) {
-  // Use native Node.js solution (no external unzip needed)
-  const AdmZip = require('adm-zip');
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(destDir, true);
+async function unzipFile(archivePath, destDir) {
+  if (archivePath.endsWith('.tar.gz')) {
+    await execPromise(`tar -xzf "${archivePath}" -C "${destDir}"`);
+  } else {
+    const AdmZip = require('adm-zip');
+    const zip = new AdmZip(archivePath);
+    zip.extractAllTo(destDir, true);
+  }
 }
 
 async function checkDependencies() {
   console.log('[1/4] Checking dependencies...');
 
-  // Check if pandoc exists in the tool directory
-  const pandocPath = path.join(__dirname, 'pandoc-3.1.11', 'pandoc.exe');
+  const isWindows = process.platform === 'win32';
+  // Windows zip: pandoc-3.1.11/pandoc.exe
+  // Linux tar.gz: pandoc-3.1.11/bin/pandoc
+  // macOS zip: pandoc-3.1.11/bin/pandoc
+  const pandocSubPath = isWindows ? 'pandoc.exe' : path.join('bin', 'pandoc');
+  const pandocPath = path.join(__dirname, 'pandoc-3.1.11', pandocSubPath);
+
   if (!fs.existsSync(pandocPath)) {
     console.log('  - Pandoc not found locally, downloading...');
     try {
@@ -69,16 +77,27 @@ async function checkDependencies() {
         await execPromise('npm install adm-zip', { cwd: __dirname });
       }
 
-      // Download Pandoc
-      const zipPath = path.join(__dirname, 'pandoc.zip');
-      await execPromise('curl -L https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-windows-x86_64.zip -o pandoc.zip', { cwd: __dirname });
+      // Download platform-specific Pandoc
+      let downloadUrl, archiveName;
+      if (isWindows) {
+        downloadUrl = 'https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-windows-x86_64.zip';
+        archiveName = 'pandoc.zip';
+      } else if (process.platform === 'darwin') {
+        downloadUrl = 'https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-macOS.zip';
+        archiveName = 'pandoc.zip';
+      } else {
+        downloadUrl = 'https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-linux-amd64.tar.gz';
+        archiveName = 'pandoc.tar.gz';
+      }
+      const archivePath = path.join(__dirname, archiveName);
+      await execPromise(`curl -L "${downloadUrl}" -o "${archiveName}"`, { cwd: __dirname });
 
-      // Unzip using Node.js (cross-platform)
+      // Extract archive
       console.log('  - Extracting Pandoc...');
-      await unzipFile(zipPath, __dirname);
+      await unzipFile(archivePath, __dirname);
 
       // Clean up
-      fs.unlinkSync(zipPath);
+      fs.unlinkSync(archivePath);
       console.log('  - Pandoc downloaded successfully');
     } catch (error) {
       console.error('  - Failed to download Pandoc:', error.message);
@@ -107,7 +126,9 @@ async function checkDependencies() {
 async function convertMarkdownToHTML() {
   console.log('\n[2/4] Converting Markdown to HTML with MathJax...');
 
-  const pandocPath = path.join(__dirname, 'pandoc-3.1.11', 'pandoc.exe');
+  const isWin = process.platform === 'win32';
+  const pandocSubPath = isWin ? 'pandoc.exe' : path.join('bin', 'pandoc');
+  const pandocPath = path.join(__dirname, 'pandoc-3.1.11', pandocSubPath);
   const cmd = `"${pandocPath}" "${inputFile}" -o "${htmlFile}" --mathjax --standalone --toc --toc-depth=2 --metadata title="Document"`;
 
   try {
